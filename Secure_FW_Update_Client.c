@@ -1,5 +1,8 @@
+// Basic Header
 #include <stdio.h>
+#include <stdlib.h>
 
+// TPM Header
 #include <tss/platform.h>
 #include <tss/tss_defines.h>
 #include <tss/tss_typedef.h>
@@ -8,289 +11,188 @@
 #include <tss/tspi.h>
 #include <trousers/trousers.h>
 
+// OpenSSL Header
 #include <openssl/sha.h>
 #include <openssl/rsa.h>
 #include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 
-#define SIGN_KEY_UUID {0, 0, 0, 0, 0, {0, 0, 0, 5, 16}}
+#define SIGN_KEY_UUID {0, 0, 0, 0, 0, {0, 0, 0, 1, 2}}
 #define DBG(message, tResult) printf("(Line%d, %s) %s returned 0x%08x. %s.\n\n",__LINE__ ,__func__ , message, tResult, (char *)Trspi_Error_String(tResult));
 #define DEBUG 1
 
-int generate_Signature(unsigned char* str)
+void TPM_ERROR_PRINT(int res, char* msg)
+{
+#if DEBUG
+	DBG(msg, res);
+#endif
+	if (res != 0) exit(1);
+}
+
+int generate_Signature(unsigned char* xor_result)
 {
 	TSS_HCONTEXT hContext;
 	TSS_RESULT result;
-	TSS_HKEY hSRK;
+	TSS_HKEY hSRK, hSigning_key;
 	TSS_HPOLICY hSRKPolicy, hNVPolicy;
 	TSS_UUID MY_UUID = SIGN_KEY_UUID;
 	TSS_UUID SRK_UUID = TSS_UUID_SRK;
-	TSS_HKEY hSigning_key;
 	TSS_FLAG initFlags = TSS_KEY_TYPE_SIGNING | TSS_KEY_SIZE_2048 | TSS_KEY_NO_AUTHORIZATION | TSS_KEY_NOT_MIGRATABLE;
 	TSS_HHASH hHash;
 	TSS_HNVSTORE hNVStore;
-	BYTE *pubkey, *sig;
-	UINT32 pubKeySize, srk_authusage, sigLen;
+	BYTE *sign;
+	UINT32 srk_authusage, signLen;
 
 	result = Tspi_Context_Create(&hContext);
-#if DEBUG
-	DBG("Create a context\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create TPM Context\n");
 
 	result = Tspi_Context_Connect(hContext, NULL);
-#if DEBUG
-	DBG("Connect to TPM\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Connect to TPM\n");
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_RSAKEY, initFlags, &hSigning_key);
-#if DEBUG
-	DBG("Create the key object\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create the Signing key Object\n");
 
 	result = Tspi_Context_LoadKeyByUUID(hContext, TSS_PS_TYPE_SYSTEM, SRK_UUID, &hSRK);
-#if DEBUG
-	DBG("Get SRK handle\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Get SRK Handle\n");
 
 	result = Tspi_GetAttribUint32(hSRK, TSS_TSPATTRIB_KEY_INFO, TSS_TSPATTRIB_KEYINFO_AUTHUSAGE, &srk_authusage);
-#if DEBUG
-	DBG("Get Attribute\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Get SRK Attribute\n");
 
 	if (srk_authusage)
 	{
 		result = Tspi_GetPolicyObject(hSRK, TSS_POLICY_USAGE, &hSRKPolicy);
-#if DEBUG
-		DBG("Tspi_GetPolicyObject\n", result);
-#endif
-		if (result != 0) return 1;
+		TPM_ERROR_PRINT(result, "Get SRK Policy\n");
 
-		result = Tspi_Policy_SetSecret(hSRKPolicy, TSS_SECRET_MODE_PLAIN, 10, SRK_PASSWD);
-#if DEBUG
-		DBG("Set Secret\n", result);
-#endif
-		if (result != 0) return 1;
+		result = Tspi_Policy_SetSecret(hSRKPolicy, TSS_SECRET_MODE_PLAIN, 1, "1");
+		//result = Tspi_Policy_SetSecret(hSRKPolicy, TSS_SECRET_MODE_PLAIN, 10, SRK_PASSWD);
+		TPM_ERROR_PRINT(result, "Set SRK Secret\n");
 	}
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_HASH, TSS_HASH_SHA1, &hHash);
-#if DEBUG
-	DBG("Create Object\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create Hash Object\n");
 
-	result = Tspi_Hash_SetHashValue(hHash, 20, str);
-#if DEBUG
-	DBG("Set Hash\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_Hash_SetHashValue(hHash, 20, xor_result);
+	TPM_ERROR_PRINT(result, "Set Hash Value for Generating Signature\n");
 
 	result = Tspi_Hash_Sign(hHash, hSigning_key, &sigLen, &sig);
-#if DEBUG
-	DBG("Hash Sign\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Generate Signature\n");
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_NV, 0, &hNVStore);
-#if DEBUG
-	DBG("Create NV object\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create NVRAM Object\n");
 
-	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_INDEX, 0, 0x00011101);
-#if DEBUG
-	DBG("Set index\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_INDEX, 0, 2);
+	TPM_ERROR_PRINT(result, "Set NVRAM Index\n");
 
 	result = Tspi_NV_ReleaseSpace(hNVStore);
-#if DEBUG
-	DBG("Release\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Release NVRAM Space\n");
 
 	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_PERMISSIONS, 0, TPM_NV_PER_OWNERWRITE);
-#if DEBUG
-	DBG("Set Policy\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Set NVRAM Attribute\n");
 
-	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_DATASIZE, 0, 0x100);
-#if DEBUG
-	DBG("Set size\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_DATASIZE, 0, 256);
+	TPM_ERROR_PRINT(result, "Set NVRAM Data Size\n");
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_POLICY, TSS_POLICY_USAGE, &hNVPolicy);
-#if DEBUG
-	DBG("Create Context\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Set NVRAM Policy\n");
 
-	result = Tspi_Policy_AssignToObject(hNVPolicy, hNVStore);
-#if DEBUG
-	DBG("Policy Assign\n", result);
-#endif
-	if (result != 0) return 1;
+//	result = Tspi_Policy_AssignToObject(hNVPolicy, hNVStore);
+//	TPM_ERROR_PRINT(result, "Assign NVRAM Object\n");
 
 	result = Tspi_NV_DefineSpace(hNVStore, 0, 0);
-#if DEBUG
-	DBG("NVRAM DefineSpace\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create NVRAM Space\n");
 
-	result = Tspi_NV_WriteValue(hNVStore, 0, sigLen, sig);
-#if DEBUG
-	DBG("Write NVRAM\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_NV_WriteValue(hNVStore, 0, signLen, sign);
+	TPM_ERROR_PRINT(result, "Write Signature in NVRAM\n");
 
-	result = Tspi_Policy_FlushSecret(hSigning_key);
-#if DEBUG
-	DBG("Flush Secret\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_Policy_FlushSecret(hSRKPolicy);
+	TPM_ERROR_PRINT(result, "Flush SRKPolicy Secret\n");
+
+	result = Tspi_Policy_FlushSecret(hNVPolicy);
+	TPM_ERROR_PRINT(result, "Flush NVPolicy Secret\n");
 
 	result = Tspi_Context_FreeMemory(hContext, NULL);
-#if DEBUG
-	DBG("Free Memory\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Free TPM Memory\n");
 
 	result = Tspi_Context_Close(hContext);
-#if DEBUG
-	DBG("Close TPM\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Close TPM\n");
 
 	return 0;
 }
 
-int verify_firmware_version_Signature(unsigned char* str)
+int verify_firmware_signature(unsigned char* decrypt_sign)
 {
 	TSS_HCONTEXT hContext;
 	TSS_RESULT result;
-	TSS_HKEY hSRK;
+	TSS_HKEY hSRK, hSigning_key;
 	TSS_HPOLICY hSRKPolicy, hNVPolicy;
 	TSS_UUID MY_UUID = SIGN_KEY_UUID;
 	TSS_UUID SRK_UUID = TSS_UUID_SRK;
-	TSS_HKEY hSigning_key;
 	TSS_FLAG initFlags = TSS_KEY_TYPE_SIGNING | TSS_KEY_SIZE_2048 | TSS_KEY_NO_AUTHORIZATION | TSS_KEY_NOT_MIGRATABLE;
 	TSS_HHASH hHash;
 	TSS_HNVSTORE hNVStore;
-	BYTE *pubkey, *sig, *data;
-	UINT32 pubKeySize = 256, srk_authusage, sigLen, datasize = 256;
+	BYTE *sign, *data;
+	UINT32 srk_authusage, signLen, datasize = 256;
 
 	result = Tspi_Context_Create(&hContext);
-#if DEBUG
-	DBG("Create a Context\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create TPM Context\n");
 
 	result = Tspi_Context_Connect(hContext, NULL);
-#if DEBUG
-	DBG("Connect to TPM\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Connect to TPM\n");
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_NV, 0, &hNVStore);
-#if DEBUG
-	DBG("Create NV Object\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create NVRAM Object\n");
 
-	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_INDEX, 0, 0x00011101);
-#if DEBUG
-	DBG("Set index\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_INDEX, 0, 2);
+	TPM_ERROR_PRINT(result, "Set NVRAM Index\n");
 
-	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_DATASIZE, 0, 0x100);
-#if DEBUG
-	DBG("Set Size\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_SetAttribUint32(hNVStore, TSS_TSPATTRIB_NV_DATASIZE, 0, 256);
+	TPM_ERROR_PRINT(result, "Set NVRAM Data Size\n");
 
 	result = Tspi_NV_ReadValue(hNVStore, 0, &datasize, &data);
-#if DEBUG
-	DBG("Read value\n", result);
-#endif
-	if (result != 0) return 1;
-
-	if (data == NULL)
-	{
-		printf("NVRAM read failed\n");
-		return 1;
-	}
+	TPM_ERROR_PRINT(result, "Read Signature in NVRAM\n");
 
 	result = Tspi_Context_LoadKeyByUUID(hContext, TSS_PS_TYPE_SYSTEM, SRK_UUID, &hSRK);
-#if DEBUG
-	DBG("Get SRK handle\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Get SRK Handle\n");
 
 	result = Tspi_GetAttribUint32(hSRK, TSS_TSPATTRIB_KEY_INFO, TSS_TSPATTRIB_KEYINFO_AUTHUSAGE, &srk_authusage);
-#if DEBUG
-	DBG("Get Attribute\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Get SRK Attribute\n");
 
-	result = Tspi_GetPolicyObject(hSRK, TSS_POLICY_USAGE, &hSRKPolicy);
-#if DEBUG
-	DBG("Set Secret\n", result);
-#endif
-	if (result != 0) return 1;
+	if (srk_authusage)
+	{
+		result = Tspi_GetPolicyObject(hSRK, TSS_POLICY_USAGE, &hSRKPolicy);
+		TPM_ERROR_PRINT(result, "Get SRK Policy\n");
 
-	result = Tspi_Policy_SetSecret(hSRKPolicy, TSS_SECRET_MODE_PLAIN, 1, "1");
-#if DEBUG
-	DBG("Set Secret\n", result);
-#endif
-	if (result != 0) return 1;
+		result = Tspi_Policy_SetSecret(hSRKPolicy, TSS_SECRET_MODE_PLAIN, 1, "1");
+		TPM_ERROR_PRINT(result, "Set SRK Secret\n");
+	}
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_RSAKEY, initFlags, &hSigning_key);
-#if DEBUG
-	DBG("Context create\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create the Signing key Object\n");
 
 	result = Tspi_Context_LoadKeyByUUID(hContext, TSS_PS_TYPE_SYSTEM, MY_UUID, &hSigning_key);
-#if DEBUG
-	DBG("Load key\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Load the Signing Key\n");
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_HASH, TSS_HASH_SHA1, &hHash);
-#if DEBUG
-	DBG("Create Object\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Create Hash Object\n");
 
-	result = Tspi_Hash_SetHashValue(hHash, 20, str);
-#if DEBUG
-	DBG("Set Hash\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_Hash_SetHashValue(hHash, 20, xor_result);
+	TPM_ERROR_PRINT(result, "Set Hash Value for Verifying Signature\n");
 
 	result = Tspi_Hash_VerifySignature(hHash, hSigning_key, 256, data);
-#if DEBUG
-	DBG("Verify\n", result);
-#endif
-	if (result == 0) return 1;
+	TPM_ERROR_PRINT(result, "Verify Signature\n");
 
-	result = Tspi_Policy_FlushSecret(hSigning_key);
-#if DEBUG
-	DBG("Flush Secret\n", result);
-#endif
-	if (result != 0) return 1;
+	result = Tspi_Policy_FlushSecret(hSRKPolicy);
+	TPM_ERROR_PRINT(result, "Flush SRKPolicy Secret\n");
+
+	result = Tspi_Policy_FlushSecret(hNVPolicy);
+	TPM_ERROR_PRINT(result, "Flush NVPolicy Secret\n");
+
+	result = Tspi_Context_FreeMemory(hContext, NULL);
+	TPM_ERROR_PRINT(result, "Free TPM Memory\n");
 
 	result = Tspi_Context_Close(hContext);
-#if DEBUG
-	DBG("Close TPM\n", result);
-#endif
-	if (result != 0) return 1;
+	TPM_ERROR_PRINT(result, "Close TPM\n");
 
 	return 0;
 }
@@ -299,60 +201,54 @@ int receive_firmware(BIO *sbio)
 {
 	FILE* fp;
 	char buf[1024];
-	int len = 1;
+	int len;
 
-	/// firmware rececive start ///
+	// Firmware Rececive Start
 	if (!(fp = fopen("Firmware", "wb")))
 	{
-		printf("File open error\n");
+		printf("Firmware Open Fail\n");
 		return 1;
 	}
-	while (len>0)
-	{
-		if ((len = BIO_read(sbio, buf, 1024)) < 0)
-		{
-			printf("BIO_read failed\n");
-			return 1;
-		}
 
+	while ((len = BIO_read(sbio, buf, 1024)) != 0)
 		fwrite((void*)buf, 1, len, fp);
-	}
 	fclose(fp);
 
-	/// firmware signature receive start ///
+	// Firmware Signature Receive Start
 	len = 1;
 	if (!(fp = fopen("Signature", "wb")))
 	{
-		printf("File open failed\n");
+		printf("Signature Open Fail\n");
 		return 1;
 	}
-	while (len>0)
-	{
-		if ((len = BIO_read(sbio, buf, 1024)) < 0)
-		{
-			printf("BIO_read faile\n");
-			return 1;
-		}
 
+	while ((len = BIO_read(sbio, buf, 1024)) != 0)	{
 		fwrite((void*)buf, 1, len, fp);
-	}
 	fclose(fp);
 
 	return 0;
 }
 
-int decrypt_firmware_Signature(unsigned char* decrypt_sign)
+int verify_firmware_signature(unsigned char* decrypt_sign)
 {
+	// SHA Value
+	SHA_CTX ctx;
+	char sha1_result[SHA_DIGEST_LENGTH];
+	unsigned char buf2[256];
+	int i;
+
+	// Decrypt Value
 	FILE* fp;
-	char buf[256];
+	char *buf = NULL;
 	int len, decrypt_sign_len;
 	X509* user_x509 = NULL;
 	RSA* pub_key = NULL;
 	EVP_PKEY* e_pub_key = NULL;
 
+	// Extract Public Key
 	if (!(fp = fopen("Cert", "rb")))
 	{
-		printf("File open error\n");
+		printf("Cert Open Error\n");
 		return 1;
 	}
 
@@ -362,42 +258,74 @@ int decrypt_firmware_Signature(unsigned char* decrypt_sign)
 
 	fclose(fp);
 
+	// Decrypt Signature
 	if (!(fp = fopen("Signature", "rb")))
 	{
-		printf("File open error\n");
+		printf("Signature Open Error\n");
 		return 1;
 	}
 
-	len = fread((void*)buf, 1, 256, fp);
+	fseek(fp, 0L, SEEK_END);
+	len = ftell(fp);
+	fseek(fp, 0L, SEEK_SET);
+	buf = (char*)calloc(len, sizeof(char));
+	fread((void*)buf, 1, len, fp);
 	fclose(fp);
 
 	decrypt_sign_len = RSA_public_decrypt(len, buf, decrypt_sign, pub_key, RSA_PKCS1_PADDING);
 
 	if (decrypt_sign_len < 1)
 	{
-		printf("RSA decryption failed\n");
+		printf("Signature Decryption Fail\n");
+		free(buf);
+		return 1;
+	}
+	else
+	{
+		printf("Signature Decryption Success\n");
+		free(buf);
+	}
+
+	// Hash New Firmware
+	if (!(fp = fopen("Firmware", "rb")))
+	{
+		printf("Firmware Open Fail\n");
+		return 1;
+	}
+
+	SHA1_Init(&ctx);
+	while ((i = fread(buf2, 1, sizeof(buf2), fp)) > 0)
+		SHA1_Update(&ctx, buf2, i);
+	SHA1_Final(sha1_result, &ctx);
+
+	fclose(fp);
+
+	// Verify New Firmware
+	if(!memcmp(decrypt_sign, sha1_result, 20))
+		printf("New Firmware Verification Success\n");
+	else
+	{
+		printf("New Firmware Verification Fail\n");
+		return 1;
 	}
 
 	return 0;
 }
 
-int receiveData(BIO* sbio, char* recvData)
-{
-	BIO_read(sbio, recvData, 10);
-}
-
 int main()
 {
 	char decrypt_sign[20];
-	char recvData[10];
 
 	SSL_METHOD *meth;
 	SSL_CTX *ctx;
 	SSL *ssl;
 	BIO *sbio, *out;
 	BIO *bio_err = 0;
+	int len, res;
 
-	if (!bio_err) {
+	// SSL Connection Start
+	if (!bio_err)
+	{
 		SSL_library_init();
 		SSL_load_error_strings();
 		bio_err = BIO_new_fp(stderr, BIO_NOCLOSE);
@@ -407,46 +335,56 @@ int main()
 	ctx = SSL_CTX_new(meth);
 	sbio = BIO_new_ssl_connect(ctx);
 	BIO_get_ssl(sbio, &ssl);
-	if (!ssl) {
+
+	if (!ssl)
+	{
 		fprintf(stderr, "Can't locate SSL pointer\n");
 		exit(1);
 	}
+	
 	SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
-	BIO_set_conn_hostname(sbio, "serverIP:Port");
+	BIO_set_conn_hostname(sbio, "163.180.118.146:4000");
 	out = BIO_new_fp(stdout, BIO_NOCLOSE);
+
 	res = BIO_do_connect(sbio);
-	if (res <= 0) {
+	if (res <= 0)
+	{
 		fprintf(stderr, "Error connecting to server\n");
 		ERR_print_errors_fp(stderr);
 		exit(1);
 	}
+
 	res = BIO_do_handshake(sbio);
-	if (res <= 0) {
+	if (res <= 0)
+	{
 		fprintf(stderr, "Error establishing SSL connection \n");
 		ERR_print_errors_fp(stderr);
 		exit(1);
 	}
 
+	// Receive Firmware
 	if (receive_firmware(sbio) != 0)
 	{
 		printf("Data receive failed\n");
 		return 1;
 	}
 
-	if (decrypt_firmware_Signature(decrypt_sign) != 0)
+	// Verify Firmware Signature
+	memset(decrypt_sign, 0, 20);
+	if (verify_firmware_signature(decrypt_sign) != 0)
 	{
 		printf("Firmware_Signature decryption failed\n");
 		return 1;
 	}
 
-	//NVRAM all data verify using while or for
-	if (verify_firmware_version_Signature(decrypt_sign) != 0)
+	// Verify Firmware Signature
+	if (verify_firmware_signature(decrypt_sign) != 0)
 	{
 		printf("Firmware_version_Signature verify failed\n");
 		return 1;
 	}
 
-	if (generate_Signature(decrypt_sign) != 0)
+	if (generate_signature(decrypt_sign) != 0)
 	{
 		printf("Signature generation failed\n");
 		return 1;
