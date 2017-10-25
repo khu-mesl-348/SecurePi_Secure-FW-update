@@ -30,7 +30,7 @@ void TPM_ERROR_PRINT(int res, char* msg)
 	if (res != 0) exit(1);
 }
 
-int generate_Signature(unsigned char* xor_result)
+int generate_signature(unsigned char* xor_result)
 {
 	TSS_HCONTEXT hContext;
 	TSS_RESULT result;
@@ -75,7 +75,7 @@ int generate_Signature(unsigned char* xor_result)
 	result = Tspi_Hash_SetHashValue(hHash, 20, xor_result);
 	TPM_ERROR_PRINT(result, "Set Hash Value for Generating Signature\n");
 
-	result = Tspi_Hash_Sign(hHash, hSigning_key, &sigLen, &sig);
+	result = Tspi_Hash_Sign(hHash, hSigning_key, &signLen, &sign);
 	TPM_ERROR_PRINT(result, "Generate Signature\n");
 
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_NV, 0, &hNVStore);
@@ -120,7 +120,7 @@ int generate_Signature(unsigned char* xor_result)
 	return 0;
 }
 
-int verify_firmware_signature(unsigned char* decrypt_sign)
+int verify_firmware_signature2(unsigned char* decrypt_sign)
 {
 	TSS_HCONTEXT hContext;
 	TSS_RESULT result;
@@ -176,7 +176,7 @@ int verify_firmware_signature(unsigned char* decrypt_sign)
 	result = Tspi_Context_CreateObject(hContext, TSS_OBJECT_TYPE_HASH, TSS_HASH_SHA1, &hHash);
 	TPM_ERROR_PRINT(result, "Create Hash Object\n");
 
-	result = Tspi_Hash_SetHashValue(hHash, 20, xor_result);
+	result = Tspi_Hash_SetHashValue(hHash, 20, decrypt_sign);
 	TPM_ERROR_PRINT(result, "Set Hash Value for Verifying Signature\n");
 
 	result = Tspi_Hash_VerifySignature(hHash, hSigning_key, 256, data);
@@ -197,12 +197,12 @@ int verify_firmware_signature(unsigned char* decrypt_sign)
 	return 0;
 }
 
-int receive_firmware(BIO *sbio)
+int receiveData(BIO *sbio, char* sign)
 {
-	FILE* fp;
-	char buf[1024];
 	int len;
-
+	FILE* fp;
+	char buf[512];
+	
 	// Firmware Rececive Start
 	if (!(fp = fopen("Firmware", "wb")))
 	{
@@ -210,37 +210,46 @@ int receive_firmware(BIO *sbio)
 		return 1;
 	}
 
-	while ((len = BIO_read(sbio, buf, 1024)) != 0)
+	memset(buf, 0, 512);
+	while ((len = BIO_read(sbio, buf, 512)) != 0)
+	{
+		fwrite((void*)buf, 1, len, fp);
+		printf("len: %d\n", len);
+	}
+	fclose(fp);
+
+	// Certificate Rececive Start
+	if (!(fp = fopen("Cert", "wb")))
+	{
+		printf("Cert Open Fail\n");
+		return 1;
+	}
+
+	while ((len = BIO_read(sbio, buf, 512)) != 0)
 		fwrite((void*)buf, 1, len, fp);
 	fclose(fp);
 
 	// Firmware Signature Receive Start
-	len = 1;
-	if (!(fp = fopen("Signature", "wb")))
-	{
-		printf("Signature Open Fail\n");
-		return 1;
-	}
-
-	while ((len = BIO_read(sbio, buf, 1024)) != 0)	{
+	while ((len = BIO_read(sbio, buf, 512)) != 0)
 		fwrite((void*)buf, 1, len, fp);
-	fclose(fp);
+
+	strcpy(sign, buf);
 
 	return 0;
 }
 
-int verify_firmware_signature(unsigned char* decrypt_sign)
+int verify_firmware_signature(char* sign)
 {
 	// SHA Value
 	SHA_CTX ctx;
 	char sha1_result[SHA_DIGEST_LENGTH];
-	unsigned char buf2[256];
+	unsigned char buf[256];
 	int i;
 
 	// Decrypt Value
 	FILE* fp;
-	char *buf = NULL;
-	int len, decrypt_sign_len;
+	char decrypt_sign[20];
+	int decrypt_signlen;
 	X509* user_x509 = NULL;
 	RSA* pub_key = NULL;
 	EVP_PKEY* e_pub_key = NULL;
@@ -259,32 +268,15 @@ int verify_firmware_signature(unsigned char* decrypt_sign)
 	fclose(fp);
 
 	// Decrypt Signature
-	if (!(fp = fopen("Signature", "rb")))
-	{
-		printf("Signature Open Error\n");
-		return 1;
-	}
+	decrypt_signlen = RSA_public_decrypt(256, sign, decrypt_sign, pub_key, RSA_PKCS1_PADDING);
 
-	fseek(fp, 0L, SEEK_END);
-	len = ftell(fp);
-	fseek(fp, 0L, SEEK_SET);
-	buf = (char*)calloc(len, sizeof(char));
-	fread((void*)buf, 1, len, fp);
-	fclose(fp);
-
-	decrypt_sign_len = RSA_public_decrypt(len, buf, decrypt_sign, pub_key, RSA_PKCS1_PADDING);
-
-	if (decrypt_sign_len < 1)
+	if (decrypt_signlen < 1)
 	{
 		printf("Signature Decryption Fail\n");
-		free(buf);
 		return 1;
 	}
 	else
-	{
 		printf("Signature Decryption Success\n");
-		free(buf);
-	}
 
 	// Hash New Firmware
 	if (!(fp = fopen("Firmware", "rb")))
@@ -294,8 +286,8 @@ int verify_firmware_signature(unsigned char* decrypt_sign)
 	}
 
 	SHA1_Init(&ctx);
-	while ((i = fread(buf2, 1, sizeof(buf2), fp)) > 0)
-		SHA1_Update(&ctx, buf2, i);
+	while ((i = fread(buf, 1, sizeof(buf), fp)) > 0)
+		SHA1_Update(&ctx, buf, i);
 	SHA1_Final(sha1_result, &ctx);
 
 	fclose(fp);
@@ -314,8 +306,10 @@ int verify_firmware_signature(unsigned char* decrypt_sign)
 
 int main()
 {
-	char decrypt_sign[20];
+	// Signature Value
+	char sign[256];
 
+	// SSL Value
 	SSL_METHOD *meth;
 	SSL_CTX *ctx;
 	SSL *ssl;
@@ -343,7 +337,7 @@ int main()
 	}
 	
 	SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
-	BIO_set_conn_hostname(sbio, "163.180.118.146:4000");
+	BIO_set_conn_hostname(sbio, "163.180.118.145:4000");
 	out = BIO_new_fp(stdout, BIO_NOCLOSE);
 
 	res = BIO_do_connect(sbio);
@@ -361,30 +355,25 @@ int main()
 		ERR_print_errors_fp(stderr);
 		exit(1);
 	}
+	else
+		printf("SSL Connection Success\n");
 
 	// Receive Firmware
-	if (receive_firmware(sbio) != 0)
+	memset(sign, 0, 256);
+	if (receiveData(sbio, sign) != 0)
 	{
 		printf("Data receive failed\n");
 		return 1;
 	}
 
 	// Verify Firmware Signature
-	memset(decrypt_sign, 0, 20);
-	if (verify_firmware_signature(decrypt_sign) != 0)
+	if (verify_firmware_signature(sign) != 0)
 	{
 		printf("Firmware_Signature decryption failed\n");
 		return 1;
 	}
 
-	// Verify Firmware Signature
-	if (verify_firmware_signature(decrypt_sign) != 0)
-	{
-		printf("Firmware_version_Signature verify failed\n");
-		return 1;
-	}
-
-	if (generate_signature(decrypt_sign) != 0)
+	if (generate_signature(sign) != 0)
 	{
 		printf("Signature generation failed\n");
 		return 1;
