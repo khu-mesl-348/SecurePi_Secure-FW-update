@@ -64,6 +64,84 @@ int generate_firmware_signature(char* sign)
 	return 0;
 }
 
+int sendData2(BIO* sbio, char* sign)
+{
+	FILE *fp;
+	int sendLen;
+	char *sendBuf = NULL;
+	int fwLen, certLen, signLen;
+	char *fwBuf = NULL, *certBuf = NULL;
+	int len;
+	char fwlenBuf[10] = "", certlenBuf[10] = "", signlenBuf[10] = "";
+
+	// Read New Firmware
+	if (!(fp = fopen("Firmware", "rb")))
+	{
+		printf("Firmware Open Error\n");
+		return 1;
+	}
+
+	fseek(fp, 0L, SEEK_END);
+	fwLen = ftell(fp);
+	fseek(fp, 0L, SEEK_SET);
+	fwBuf = (char*)calloc(fwLen, sizeof(char));
+	fread(fwBuf, 1, fwLen, fp);
+	fclose(fp);
+
+	// Read Certificate
+	if (!(fp = fopen("cert", "rb")))
+	{
+		printf("Certificate Open Error\n");
+		return 1;
+	}
+
+	fseek(fp, 0L, SEEK_END);
+	certLen = ftell(fp);
+	fseek(fp, 0L, SEEK_SET);
+	certBuf = (char*)calloc(certLen, sizeof(char));
+	fread(certBuf, 1, certLen, fp);
+	fclose(fp);
+
+	// Assign sendBuf
+	len = sprintf(fwlenBuf, "%d", fwLen);
+	sendLen = len + fwLen;
+
+	len = sprintf(certlenBuf, "%d", certLen);
+	sendLen = sendLen + len + certLen;
+
+	signLen = 256;
+	len = sprintf(signlenBuf, "%d", signLen);
+	sendLen = sendLen + len + 256; // 256 is Signature Length
+
+	sendBuf = (char*)calloc(sendLen + 6, sizeof(char)); // 6 is add space length
+	
+	strcpy(sendBuf, fwlenBuf);
+	strcat(sendBuf, "  ");
+
+	strcat(sendBuf, certlenBuf);
+	strcat(sendBuf, "  ");
+
+	strcat(sendBuf, signlenBuf);
+	strcat(sendBuf, "  ");
+
+	strcat(sendBuf, fwBuf);
+	strcat(sendBuf, certBuf);
+	strcat(sendBuf, sign);
+
+	if (BIO_write(sbio, sendBuf, sendLen + 6) < 0)
+	{
+		printf("Send New Firmware Fail\n");
+		free(sendBuf);
+		return 1;
+	}
+	
+	free(fwBuf);
+	free(certBuf);
+	free(sendBuf);
+
+	return 0;
+}
+
 int sendData(BIO* sbio, char* sign)
 {
 	int len;
@@ -95,13 +173,6 @@ int sendData(BIO* sbio, char* sign)
 
 	free(buf);
 
-	while (1)
-	{
-		if (BIO_read(sbio, recvBuf, 10) > 0)
-			if (strcmp(recvBuf, "Success") == 0)
-				break;
-	}
-
 	// Send Certificate
 	if (!(fp = fopen("cert", "rb")))
 	{
@@ -125,13 +196,6 @@ int sendData(BIO* sbio, char* sign)
 	}
 
 	free(buf);
-
-	while (1)
-	{
-		if (BIO_read(sbio, recvBuf, 10) > 0)
-			if (strcmp(recvBuf, "Success") == 0)
-				break;
-	}
 
 	// Send Signature
 	if (BIO_write(sbio, sign, 256) < 0)
@@ -217,7 +281,13 @@ int main()
 	}
 
 	// Send New Firmware and Signature
-	sendData(out, sign);
+	//sendData(out, sign);
+	sendData2(out, sign);
+	
+	BIO_free(bio);
+	BIO_free(abio);
+	BIO_free(out);
+
 
 	return 0;
 }

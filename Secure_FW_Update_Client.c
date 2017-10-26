@@ -197,44 +197,81 @@ int verify_firmware_signature2(unsigned char* decrypt_sign)
 	return 0;
 }
 
-int receiveData(BIO *sbio, char* sign)
+void dividestr(char* dest, char* source, int start, int end)
+{
+	int i, j=0;
+
+	for (i = start; i < end; i++)
+	{
+		dest[j++] = source[i];
+		printf("dest[%d]: %c, source[%d]: %c\n", j, dest[j - 1], i, source[i]);
+	}
+}
+
+int receiveData2(BIO *sbio, char* sign)
 {
 	int len;
 	FILE* fp;
-	char buf[512];
-	
-	// Firmware Rececive Start
+	char buf[2048];
+	char data[2048];
+	char fileLen[3][10];
+	char* token = NULL;
+	int i, start, end;
+
+	for (i = 0; i < 3; i++)
+		memset(fileLen[i], 0, 10);
+	memset(data, 0, 2048);
+
+	// Data Rececive Start
+	while ((len = BIO_read(sbio, buf, 2048)) != 0);
+
+	token = strtok(buf, "  ");
+	strcpy(fileLen[0], token);
+
+	token = strtok(NULL, "  ");
+	strcpy(fileLen[1], token);
+
+	token = strtok(NULL, "  ");
+	strcpy(fileLen[2], token);
+
+	token = strtok(NULL, "");
+	strcpy(data, token);
+
+	// Store New Firmware
 	if (!(fp = fopen("Firmware", "wb")))
 	{
 		printf("Firmware Open Fail\n");
 		return 1;
 	}
+	
+	memset(buf, 0, 2048);
+	start = 1;
+	end = atoi(fileLen[0]);
+	dividestr(buf, data, start, end);
+	fwrite((void*)buf, 1, atoi(fileLen[0]), fp);
 
-	memset(buf, 0, 512);
-	while ((len = BIO_read(sbio, buf, 512)) != 0)
-	{
-		fwrite((void*)buf, 1, len, fp);
-		printf("len: %d\n", len);
-	}
 	fclose(fp);
-
-	// Certificate Rececive Start
+	
+	// Store Certificate
 	if (!(fp = fopen("Cert", "wb")))
 	{
 		printf("Cert Open Fail\n");
 		return 1;
 	}
 
-	while ((len = BIO_read(sbio, buf, 512)) != 0)
-		fwrite((void*)buf, 1, len, fp);
+	memset(buf, 0, 2048);
+	start = end + 1;
+	end = start + atoi(fileLen[1]);
+	dividestr(buf, data, start, end);
+	fwrite((void*)buf, 1, atoi(fileLen[1]), fp);
 	fclose(fp);
 
-	// Firmware Signature Receive Start
-	while ((len = BIO_read(sbio, buf, 512)) != 0)
-		fwrite((void*)buf, 1, len, fp);
-
+	memset(buf, 0, 2048);
+	start = end + 1;
+	end = start + atoi(fileLen[2]);
+	dividestr(buf, data, start, end);
 	strcpy(sign, buf);
-
+	
 	return 0;
 }
 
@@ -360,24 +397,30 @@ int main()
 
 	// Receive Firmware
 	memset(sign, 0, 256);
-	if (receiveData(sbio, sign) != 0)
+	if (receiveData2(sbio, sign) != 0)
 	{
 		printf("Data receive failed\n");
 		return 1;
 	}
 
-	// Verify Firmware Signature
-	if (verify_firmware_signature(sign) != 0)
-	{
-		printf("Firmware_Signature decryption failed\n");
-		return 1;
-	}
+	//if (receiveData(sbio, sign) != 0)
+	//{
+	//	printf("Data receive failed\n");
+	//	return 1;
+	//}
 
-	if (generate_signature(sign) != 0)
-	{
-		printf("Signature generation failed\n");
-		return 1;
-	}
+	//// Verify Firmware Signature
+	//if (verify_firmware_signature(sign) != 0)
+	//{
+	//	printf("Firmware_Signature decryption failed\n");
+	//	return 1;
+	//}
+
+	//if (generate_signature(sign) != 0)
+	//{
+	//	printf("Signature generation failed\n");
+	//	return 1;
+	//}
 
 	return 0;
 }
