@@ -10,7 +10,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-int generate_firmware_signature(char* sign)
+int generate_firmware_signature(unsigned char* sign)
 {
 	FILE* fp = NULL;
 
@@ -54,7 +54,7 @@ int generate_firmware_signature(char* sign)
 
 	fclose(fp);
 
-	sign_len = RSA_private_encrypt(20, sha1_result, sign, priv_key, RSA_PKCS1_PADDING);
+	sign_len = RSA_private_encrypt(20, (unsigned char*)sha1_result, sign, priv_key, RSA_PKCS1_PADDING);
 	if (sign_len < 1)
 	{
 		printf("RSA private encryption failed\n");
@@ -64,7 +64,7 @@ int generate_firmware_signature(char* sign)
 	return 0;
 }
 
-int sendData2(BIO* sbio, char* sign)
+int sendData(BIO* sbio, unsigned char* sign)
 {
 	FILE *fp;
 	int sendLen;
@@ -142,75 +142,10 @@ int sendData2(BIO* sbio, char* sign)
 	return 0;
 }
 
-int sendData(BIO* sbio, char* sign)
-{
-	int len;
-	FILE* fp = NULL;
-	char* buf = NULL;
-	char recvBuf[10] = "";
-
-	// Send New Firmware
-	if (!(fp = fopen("Firmware", "rb")))
-	{
-		printf("Firmware Open Error\n");
-		return 1;
-	}
-
-	fseek(fp, 0L, SEEK_END);
-	len = ftell(fp);
-	fseek(fp, 0L, SEEK_SET);
-	buf = (char*)calloc(len, sizeof(char));
-	fread(buf, 1, len, fp);
-
-	fclose(fp);
-
-	if (BIO_write(sbio, buf, len) < 0)
-	{
-		printf("Send New Firmware Fail\n");
-		free(buf);
-		return 1;
-	}
-
-	free(buf);
-
-	// Send Certificate
-	if (!(fp = fopen("cert", "rb")))
-	{
-		printf("Firmware Open Error\n");
-		return 1;
-	}
-
-	fseek(fp, 0L, SEEK_END);
-	len = ftell(fp);
-	fseek(fp, 0L, SEEK_SET);
-	buf = (char*)calloc(len, sizeof(char));
-	fread(buf, 1, len, fp);
-
-	fclose(fp);
-
-	if (BIO_write(sbio, buf, len) < 0)
-	{
-		printf("Send Certificate Fail\n");
-		free(buf);
-		return 1;
-	}
-
-	free(buf);
-
-	// Send Signature
-	if (BIO_write(sbio, sign, 256) < 0)
-	{
-		printf("Send Signature Fail\n");
-		return 1;
-	}
-
-	return 0;
-}
-
 int main()
 {
 	// Signature Value
-	char sign[256];
+	unsigned char sign[256];
 
 	// SSL Value
 	BIO *bio, *abio, *out;
@@ -281,8 +216,7 @@ int main()
 	}
 
 	// Send New Firmware and Signature
-	//sendData(out, sign);
-	sendData2(out, sign);
+	sendData(out, sign);
 	
 	BIO_free(bio);
 	BIO_free(abio);

@@ -202,13 +202,10 @@ void dividestr(char* dest, char* source, int start, int end)
 	int i, j=0;
 
 	for (i = start; i < end; i++)
-	{
 		dest[j++] = source[i];
-		printf("dest[%d]: %c, source[%d]: %c\n", j, dest[j - 1], i, source[i]);
-	}
 }
 
-int receiveData2(BIO *sbio, char* sign)
+int receiveData(BIO *sbio, unsigned char* sign)
 {
 	int len;
 	FILE* fp;
@@ -246,7 +243,7 @@ int receiveData2(BIO *sbio, char* sign)
 	
 	memset(buf, 0, 2048);
 	start = 1;
-	end = atoi(fileLen[0]);
+	end = atoi(fileLen[0]) + 1;
 	dividestr(buf, data, start, end);
 	fwrite((void*)buf, 1, atoi(fileLen[0]), fp);
 
@@ -260,14 +257,14 @@ int receiveData2(BIO *sbio, char* sign)
 	}
 
 	memset(buf, 0, 2048);
-	start = end + 1;
+	start = end;
 	end = start + atoi(fileLen[1]);
 	dividestr(buf, data, start, end);
 	fwrite((void*)buf, 1, atoi(fileLen[1]), fp);
 	fclose(fp);
 
 	memset(buf, 0, 2048);
-	start = end + 1;
+	start = end;
 	end = start + atoi(fileLen[2]);
 	dividestr(buf, data, start, end);
 	strcpy(sign, buf);
@@ -275,7 +272,7 @@ int receiveData2(BIO *sbio, char* sign)
 	return 0;
 }
 
-int verify_firmware_signature(char* sign)
+int verify_firmware_signature(unsigned char* sign)
 {
 	// SHA Value
 	SHA_CTX ctx;
@@ -305,7 +302,7 @@ int verify_firmware_signature(char* sign)
 	fclose(fp);
 
 	// Decrypt Signature
-	decrypt_signlen = RSA_public_decrypt(256, sign, decrypt_sign, pub_key, RSA_PKCS1_PADDING);
+	decrypt_signlen = RSA_public_decrypt(256, sign, (unsigned char*)decrypt_sign, pub_key, RSA_PKCS1_PADDING);
 
 	if (decrypt_signlen < 1)
 	{
@@ -344,7 +341,7 @@ int verify_firmware_signature(char* sign)
 int main()
 {
 	// Signature Value
-	char sign[256];
+	unsigned char sign[256];
 
 	// SSL Value
 	SSL_METHOD *meth;
@@ -362,8 +359,7 @@ int main()
 		bio_err = BIO_new_fp(stderr, BIO_NOCLOSE);
 	}
 
-	meth = SSLv23_client_method();
-	ctx = SSL_CTX_new(meth);
+	ctx = SSL_CTX_new(SSLv23_client_method());
 	sbio = BIO_new_ssl_connect(ctx);
 	BIO_get_ssl(sbio, &ssl);
 
@@ -397,24 +393,18 @@ int main()
 
 	// Receive Firmware
 	memset(sign, 0, 256);
-	if (receiveData2(sbio, sign) != 0)
+	if (receiveData(sbio, sign) != 0)
 	{
 		printf("Data receive failed\n");
 		return 1;
 	}
 
-	//if (receiveData(sbio, sign) != 0)
-	//{
-	//	printf("Data receive failed\n");
-	//	return 1;
-	//}
-
-	//// Verify Firmware Signature
-	//if (verify_firmware_signature(sign) != 0)
-	//{
-	//	printf("Firmware_Signature decryption failed\n");
-	//	return 1;
-	//}
+	// Verify Firmware Signature
+	if (verify_firmware_signature(sign) != 0)
+	{
+		printf("Firmware_Signature decryption failed\n");
+		return 1;
+	}
 
 	//if (generate_signature(sign) != 0)
 	//{
