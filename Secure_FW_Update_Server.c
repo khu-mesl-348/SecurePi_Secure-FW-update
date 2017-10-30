@@ -69,10 +69,25 @@ int sendData(BIO* sbio, unsigned char* sign)
 	FILE *fp;
 	int sendLen;
 	char *sendBuf = NULL;
-	int fwLen, certLen, signLen;
-	char *fwBuf = NULL, *certBuf = NULL;
+	int bootLen, fwLen, certLen, signLen;
+	char *bootBuf = NULL, *fwBuf = NULL, *certBuf = NULL;
 	int len;
-	char fwlenBuf[10] = "", certlenBuf[10] = "", signlenBuf[10] = "";
+	char bootlenBuf[10] = "", fwlenBuf[10] = "", certlenBuf[10] = "", signlenBuf[10] = "";
+	char verBuf[4] = "112";
+
+	// Read New Bootloader
+	if (!(fp = fopen("Boot", "rb")))
+	{
+		printf("Boot Open Error\n");
+		return 1;
+	}
+
+	fseek(fp, 0L, SEEK_END);
+	bootLen = ftell(fp);
+	fseek(fp, 0L, SEEK_SET);
+	bootBuf = (char*)calloc(bootLen, sizeof(char));
+	fread(bootBuf, 1, bootLen, fp);
+	fclose(fp);
 
 	// Read New Firmware
 	if (!(fp = fopen("Firmware", "rb")))
@@ -103,8 +118,11 @@ int sendData(BIO* sbio, unsigned char* sign)
 	fclose(fp);
 
 	// Assign sendBuf
+	len = sprintf(bootlenBuf, "%d", bootLen);
+	sendLen = len + bootLen;
+
 	len = sprintf(fwlenBuf, "%d", fwLen);
-	sendLen = len + fwLen;
+	sendLen = sendLen + len + fwLen;
 
 	len = sprintf(certlenBuf, "%d", certLen);
 	sendLen = sendLen + len + certLen;
@@ -113,9 +131,12 @@ int sendData(BIO* sbio, unsigned char* sign)
 	len = sprintf(signlenBuf, "%d", signLen);
 	sendLen = sendLen + len + 256; // 256 is Signature Length
 
-	sendBuf = (char*)calloc(sendLen + 6, sizeof(char)); // 6 is add space length
+	sendBuf = (char*)calloc(sendLen + 13, sizeof(char)); // 11(8+5) are add space length(8) and version length(4) and NULL(1)
 	
-	strcpy(sendBuf, fwlenBuf);
+	strcpy(sendBuf, bootlenBuf);
+	strcat(sendBuf, "  ");
+
+	strcat(sendBuf, fwlenBuf);
 	strcat(sendBuf, "  ");
 
 	strcat(sendBuf, certlenBuf);
@@ -124,17 +145,20 @@ int sendData(BIO* sbio, unsigned char* sign)
 	strcat(sendBuf, signlenBuf);
 	strcat(sendBuf, "  ");
 
+	strcat(sendBuf, verBuf);
+	strcat(sendBuf, bootBuf);
 	strcat(sendBuf, fwBuf);
 	strcat(sendBuf, certBuf);
 	strcat(sendBuf, sign);
 
-	if (BIO_write(sbio, sendBuf, sendLen + 6) < 0)
+	if (BIO_write(sbio, sendBuf, sendLen + 13) < 0)
 	{
 		printf("Send New Firmware Fail\n");
 		free(sendBuf);
 		return 1;
 	}
 	
+	free(bootBuf);
 	free(fwBuf);
 	free(certBuf);
 	free(sendBuf);
