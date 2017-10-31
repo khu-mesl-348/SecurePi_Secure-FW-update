@@ -1,0 +1,7 @@
+Firmware_Version_Initialization: Firmware_Version_Initialization.o
+	gcc -o Firmware_Version_Initialization Firmware_Version_Initialization.o -ltspi
+Firmware_Version_Initialization.o: Firmware_Version_Initialization.c
+	gcc -c Firmware_Version_Initialization.c
+
+clean:
+	rm -f Firmware_Version_Initialization Firmware_Version_Initialization.o
