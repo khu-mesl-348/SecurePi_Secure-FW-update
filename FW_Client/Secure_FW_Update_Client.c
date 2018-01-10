@@ -20,14 +20,16 @@
 
 #define SIGN_KEY_UUID {0, 0, 0, 0, 0, {0, 0, 0, 1, 1}}
 #define DBG(message, tResult) printf("(Line%d, %s) %s returned 0x%08x. %s.\n\n",__LINE__ ,__func__ , message, tResult, (char *)Trspi_Error_String(tResult));
-#define DEBUG 1
+#define DEBUG 0
+#define TPM_WELL_KNOWN_KEY_LEN 20
 
-void TPM_ERROR_PRINT(int res, char* msg)
+int TPM_ERROR_PRINT(int res, char* msg)
 {
 #if DEBUG
 	DBG(msg, res);
 #endif
-	if (res != 0) exit(1);
+	if (res != 0) return 1;
+	else return 0;
 }
 
 void dividestr(char* dest, char* source, int start, int end)
@@ -171,7 +173,9 @@ int generate_signature()
 	BYTE *sign;
 	UINT32 srk_authusage, signLen;
 	unsigned char xor_result[20];
+        char authdata[20];
 
+        memset(authdata, 0, TPM_WELL_KNOWN_KEY_LEN);
 	memset(xor_result, 0, 20);
 	result = Tspi_Context_Create(&hContext);
 	TPM_ERROR_PRINT(result, "Create TPM Context\n");
@@ -191,7 +195,7 @@ int generate_signature()
 	result = Tspi_GetPolicyObject(hSRK, TSS_POLICY_USAGE, &hSRKPolicy);
 	TPM_ERROR_PRINT(result, "Get SRK Policy Object\n");
 
-	result = Tspi_Policy_SetSecret(hSRKPolicy, TSS_SECRET_MODE_PLAIN, 1, "1");
+	result = Tspi_Policy_SetSecret(hSRKPolicy, TSS_SECRET_MODE_SHA1, TPM_WELL_KNOWN_KEY_LEN, (BYTE*)authdata);
 	TPM_ERROR_PRINT(result, "Set SRK Secret\n");
 
 	result = Tspi_Context_LoadKeyByUUID(hContext, TSS_PS_TYPE_SYSTEM, MY_UUID, &hSigning_key);
@@ -557,6 +561,7 @@ int main()
 		return 1;
 	}
 
+	system("sh chfirm.sh");
 	printf("==================================\n");
 	printf("              FINISH              \n");
 	printf("==================================\n");
